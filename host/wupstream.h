@@ -16,7 +16,8 @@
  * GamePad and this computer must be on the same network.
  * Environment: WUPSTREAM_CRF (quality, lower is better, default 18), WUPSTREAM_KBPS (the most it may use, default
  * 10000), WUPSTREAM_DEBUG=1 (statistics), WUPSTREAM_DROP=n (lose 1 packet in n: a test), WUPSTREAM_X264 (more x264 settings,
- * "key=value:..."), WUPSTREAM_DUMP=file (the encoded stream, Annex B). */
+ * "key=value:..."), WUPSTREAM_DUMP=file (the encoded stream, Annex B), WUPSTREAM_PACKET_DELAY_US (video UDP packet
+ * spacing in microseconds; default 100, range 0..5000). */
 #pragma once
 #include <stdint.h>
 #ifdef __cplusplus

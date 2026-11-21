@@ -1,0 +1,37 @@
+WUP Stream Windows host (64-bit Windows 10/11)
+
+1. Put the Wii U GamePad and this PC on the same Wi-Fi/LAN.
+2. Open WUP Stream on the GamePad and leave it at “Waiting for a Stream”.
+3. Run wup-stream.exe. A small control window and a console open. It discovers the waiting GamePad automatically. If discovery is blocked, pass the GamePad IP as the first argument: wup-stream.exe 192.168.1.42
+4. Allow wup-stream.exe through Windows Defender Firewall on Private networks (UDP; the library uses ports 50000/50001).
+
+The program scales the primary Windows desktop to 854x480, captures default-device system audio with WASAPI loopback, and sends both to the GamePad. It prints this PC's IPv4 addresses at startup to help diagnose connection issues. The GamePad and PC must be on the same network.
+
+Windows settings are not changed: the 854x480 scaling happens only in the captured image in memory. The streamer does not change display resolution, refresh rate, HDR, Windows scaling, volume, or the default audio device. There are no video/audio settings to back up or restore. GamePad touch is sent as mouse input while forwarding is enabled; held keys and mouse clicks are released when forwarding stops or the program exits.
+
+Hotkeys:
+  F8   Toggle desktop and system-audio streaming (OFF sends a black screen and silence).
+  F9   Toggle GamePad-to-PC input forwarding.
+  Esc  Exit.
+
+The control window has buttons for desktop/audio capture and GamePad input; F8/F9 remain available as shortcuts. The console shows connection status and this PC's IPv4 addresses.
+
+The Mouse control button cycles through none, left joystick and right joystick. The Mouse clicks button cycles through none, A/B, triggers (ZL left-click and ZR right-click), and triggers inverted (ZL right-click and ZR left-click). Touch still moves the pointer and holds left-click. These two selected modes are saved per Windows user in %LOCALAPPDATA%\WupStream\settings.ini and restored next time.
+
+Video frames are captured at the GamePad's 59.94 Hz refresh cadence and copied through a two-buffer capture path. UDP video packets have a default 100 microsecond spacing. Set WUPSTREAM_PACKET_DELAY_US to change it (0 disables the added delay; values are capped at 5000 microseconds).
+
+GamePad buttons become keyboard input: A/B/X/Y -> J/K/U/I; D-pad -> arrow keys;
+ZL/ZR -> Q/E; L/R -> Z/C; Plus/Minus -> Enter/Backspace; Home -> P.
+The left stick maps to WASD and the right stick maps to TFGH.
+When A/B or trigger clicks are selected, those buttons perform mouse clicks instead of their keyboard mapping; the other button mappings remain active.
+Touch moves the mouse pointer and holds the left button while touched. The app uses
+SendInput; it does not create an XInput/DirectInput virtual gamepad. Close or press
+F9 to stop forwarding, especially before typing passwords. Touch input moves the
+PC pointer while enabled.
+
+If capture is black, check Windows display/graphics privacy settings. If audio is
+silent, select a working default Windows output device. WASAPI uses the default
+console playback endpoint. Audio and video capture are toggled together with F8.
+
+This build is statically linked against MinGW runtime libraries and x264; Windows
+system DLLs remain provided by Windows itself.

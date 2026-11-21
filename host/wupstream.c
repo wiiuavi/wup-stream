@@ -40,10 +40,11 @@ struct wupstream {
     /* the pad's screen refresh, as it reports it: a recent refresh in our time, the period; a window of measurements */
     double vbase, vper, win_min, win_t0, phase, wait_t;
     int win_n, locked, wait_cur, wait_prev, skips, extra;
-    pthread_t thread; pthread_mutex_t mu; pthread_cond_t cv;  /* the sender; mu guards everything here */
+    pthread_t thread; pthread_mutex_t mu, packet_mu; pthread_cond_t cv;  /* packet_mu serializes complete video packet runs */
+    double packet_last;
     int fresh, took, have_pic, quit, started, sent, repeats;
     struct { uint32_t frame; int len, idr; uint8_t *data; } kept[8];   /* the last frames, to send lost packets again */
-    int resent, drop, rumble, rumble_sent, mic, light, light_pad;   /* light: the backlight, 1..6 | keep << 7 (in every hello) */
+    int resent, drop, packet_delay_us, rumble, rumble_sent, mic, light, light_pad;   /* packet pacing; light: 1..6 | keep << 7 */
     int16_t micbuf[48000]; int mic_w, mic_n;                 /* the last second of the microphone */            /* frames waiting on the pad: this refresh, the last */
 };
 
@@ -70,11 +71,16 @@ static void refresh_seen(wupstream *w, double t) {
     w->win_n = 0; w->locked = 1;
 }
 static void send_packet(wupstream *w, int j, int q) {            /* packet q of kept frame j */
+    if (w->packet_delay_us > 0 && w->packet_last > 0) {
+        double due = w->packet_last + w->packet_delay_us / 1000000.0;
+        while (now() < due) ;                                      /* a short precision wait avoids burst loss on the pad */
+    }
     uint8_t pkt[16 + 1400] = { 'V', (uint8_t)w->kept[j].idr };
     int off = q * 1400, n = w->kept[j].len - off < 1400 ? w->kept[j].len - off : 1400;
     memcpy(pkt + 4, &w->kept[j].frame, 4); memcpy(pkt + 8, &off, 4); memcpy(pkt + 12, &w->kept[j].len, 4);
     memcpy(pkt + 16, w->kept[j].data + off, n);
     put(w, pkt, 16 + n);
+    w->packet_last = now();
 }
 static void pump(wupstream *w) {                               /* what the pad sent; a hello now and then */
     uint8_t b[1100];
@@ -82,7 +88,8 @@ static void pump(wupstream *w) {                               /* what the pad s
     int n;
     while ((n = recvfrom(w->sock, (char *)b, sizeof b, 0, (struct sockaddr *)&from, &fl)) > 0) {
         if (from.sin_addr.s_addr != w->pad.sin_addr.s_addr) continue;
-        if (b[0] == 'N' && n >= 4 + 8 * b[1]) {                      /* the pad lacks these packets: again, at once */
+        if (b[0] == 'N' && n >= 4 + 8 * b[1]) {                      /* the pad lacks these packets: paced retransmission */
+            pthread_mutex_lock(&w->packet_mu);
             for (int i = 0; i < b[1]; i++) {
                 uint32_t f; memcpy(&f, b + 4 + 8 * i, 4);
                 int k = b[8 + 8 * i] | b[9 + 8 * i] << 8, j = f % 8;
@@ -90,6 +97,7 @@ static void pump(wupstream *w) {                               /* what the pad s
                 int npk = (w->kept[j].len + 1399) / 1400;
                 for (int q = k == 0xffff ? 0 : k; q < (k == 0xffff ? npk : k + 1) && q < npk; q++) send_packet(w, j, q), w->resent++;
             }
+            pthread_mutex_unlock(&w->packet_mu);
         }
         if (b[0] == 'M' && n > 8) for (int i = 8; i + 1 < n; i += 2) {   /* the microphone: 16-bit mono, 48 kHz */
             w->micbuf[w->mic_w] = (int16_t)(b[i] | b[i + 1] << 8); w->mic_w = (w->mic_w + 1) % 48000;
@@ -115,10 +123,12 @@ wupstream *wupstream_open(const char *ip, int timeout_ms) {
     WSADATA wd; WSAStartup(MAKEWORD(2, 2), &wd); timeBeginPeriod(1);
 #endif
     wupstream *w = calloc(1, sizeof *w);
+    pthread_mutex_init(&w->packet_mu, NULL);
+    w->packet_delay_us = 100;
     w->sock = (int)socket(AF_INET, SOCK_DGRAM, 0);                   /* (its own port: several GamePads, several programs) */
     struct sockaddr_in me = { 0 };
     me.sin_family = AF_INET;
-    if (bind(w->sock, (struct sockaddr *)&me, sizeof me)) { closesocket(w->sock); free(w); return 0; }
+    if (bind(w->sock, (struct sockaddr *)&me, sizeof me)) { closesocket(w->sock); pthread_mutex_destroy(&w->packet_mu); free(w); return 0; }
 #ifdef _WIN32
     u_long nb = 1; ioctlsocket(w->sock, FIONBIO, &nb);
 #else
@@ -178,6 +188,9 @@ wupstream *wupstream_open(const char *ip, int timeout_ms) {
     w->slices = malloc(WUPSTREAM_W * WUPSTREAM_H * 2);
     w->keyframe = 1;
     w->drop = getenv("WUPSTREAM_DROP") ? atoi(getenv("WUPSTREAM_DROP")) : 0;
+    w->packet_delay_us = getenv("WUPSTREAM_PACKET_DELAY_US") ? atoi(getenv("WUPSTREAM_PACKET_DELAY_US")) : 100;
+    if (w->packet_delay_us < 0) w->packet_delay_us = 0;
+    if (w->packet_delay_us > 5000) w->packet_delay_us = 5000;
     w->phase = (getenv("WUPSTREAM_PHASE_MS") ? atof(getenv("WUPSTREAM_PHASE_MS")) : 3) / 1000;
     for (int i = 0; i < 4; i++) {                                    /* the sticks at rest (each pad is a little off) */
         int v = (w->report[6 + 2 * i] | w->report[7 + 2 * i] << 8) - 0x800;
@@ -225,7 +238,7 @@ int wupstream_input(wupstream *w, wupstream_input_t *in) {
     return w->gone ? -1 : 0;
 }
 
-/* encode the picture in w->pic and send it: at the next refresh slot, or at once (the cushion's repeats) */
+/* encode the picture in w->pic and send it at the next refresh slot */
 static void send_picture(wupstream *w, int at_once) {
     /* one frame per refresh of the pad's screen, sent from a fixed point of it */
     double t2 = now();
@@ -269,9 +282,10 @@ static void send_picture(wupstream *w, int at_once) {
             w->slices[len++] = d[k];
         }
     }
-    { int j = w->frame % 8;                                           /* kept, for packets the pad asks for again */
+    { int j = w->frame % 8;                                           /* immutable complete encoded frame; N can only ask for this sequence */
       uint8_t *d = realloc(w->kept[j].data, len ? len : 1);
-      if (d) { memcpy(d, w->slices, len); w->kept[j].data = d; w->kept[j].frame = w->frame; w->kept[j].len = len; w->kept[j].idr = idr; } }
+      if (d) { memcpy(d, w->slices, len); w->kept[j].data = d; w->kept[j].frame = w->frame; w->kept[j].len = len; w->kept[j].idr = idr; }
+      else { w->kept[j].frame = UINT32_MAX; w->kept[j].len = 0; } }
     if (w->took) { w->fresh = 0; w->sent++; pthread_cond_broadcast(&w->cv); } else if (!at_once) w->repeats++;   /* (the program goes on) */
     pthread_mutex_unlock(&w->mu);
     while ((t2 = now()) < w->next) if (w->next - t2 > 0.002) nap();
@@ -279,11 +293,19 @@ static void send_picture(wupstream *w, int at_once) {
     /* spread over up to 4 ms: the pad's radio talks at 54 Mbit/s */
     double t0 = now(), span = 0.004 * (len + 1399) / 1400 / ((len + 1399) / 1400 + 1);
     int npk = (len + 1399) / 1400, j = w->frame % 8;
+    pthread_mutex_lock(&w->packet_mu);                              /* no retransmit can split/interleave this frame */
+    double last_packet = t0;
     for (int k = 0; k < npk; k++) {
-        while (now() < t0 + span * k / npk) ;                       /* (sub-millisecond waits: sleeping is too coarse) */
+        if (w->kept[j].frame != w->frame || !w->kept[j].data) break;
+        double due = t0 + span * k / npk;
+        double paced = last_packet + w->packet_delay_us / 1000000.0;
+        if (paced > due) due = paced;
+        while (now() < due) ;                                        /* precise sub-ms pacing; avoid coarse Sleep jitter */
         if (w->drop && rand() % w->drop == 0) continue;              /* (WUPSTREAM_DROP: a test of the pad asking again) */
         send_packet(w, j, k);
+        last_packet = now();
     }
+    pthread_mutex_unlock(&w->packet_mu);
     pthread_mutex_lock(&w->mu);
     w->frame++;
     if (idr) w->extra = CUSHION;
@@ -299,13 +321,15 @@ static void *sender(void *arg) {
         pump(w);
         if (!w->have_pic || w->gone) { pthread_mutex_unlock(&w->mu); nap(); pthread_mutex_lock(&w->mu); continue; }
         send_picture(w, 0);
-        while (w->extra > 0 && !w->quit) { w->extra--; send_picture(w, 1); }
+        while (w->extra > 0 && !w->quit) { w->extra--; send_picture(w, 0); }
     }
     pthread_mutex_unlock(&w->mu);
     return NULL;
 }
 
 int wupstream_frame(wupstream *w, const void *pixels, int stride, int format) {
+    /* One atomic source frame: hold mu through the complete RGBA->I420 copy. The sender encodes under the same lock,
+       copies the finished slice bytes into kept[frame % 8], then packetizes that immutable, monotonically numbered frame. */
     pthread_mutex_lock(&w->mu);
     while (w->fresh && !w->gone) pthread_cond_wait(&w->cv, &w->mu);  /* (the one before is on its way: one per refresh) */
     if (w->gone) { pthread_mutex_unlock(&w->mu); return -1; }
@@ -381,5 +405,5 @@ void wupstream_close(wupstream *w) {
     if (getenv("WUPSTREAM_DEBUG")) fprintf(stderr, "wupstream: %u frames, %d refreshes skipped for the pad's decoder, refresh %.3f ms, %d refreshes filled with the last picture again, %d packets sent again\n", w->frame, w->skips, w->vper * 1000, w->repeats, w->resent);
     if (w->enc) { x264_picture_clean(&w->pic); x264_encoder_close(w->enc); }
     for (int i = 0; i < 8; i++) free(w->kept[i].data);
-    closesocket(w->sock); free(w->slices); free(w);
+    closesocket(w->sock); free(w->slices); pthread_mutex_destroy(&w->packet_mu); free(w);
 }

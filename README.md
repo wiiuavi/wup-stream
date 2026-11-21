@@ -28,6 +28,12 @@ Build with `sh host/build.sh` (macOS, Linux, or Windows in an MSYS2 UCRT64 shell
 `build/host/libwupstream.a` and `build/host/sketch`, the example in `host/examples/sketch.c`. The GamePad and the
 computer must be on the same network.
 
+For a Windows 10/11 x64 desktop streamer, run `sh host/build-windows.sh` on Linux with MinGW-w64 installed.
+It writes a statically linked `dist/wup-stream.exe`; see [WINDOWS_USAGE.txt](WINDOWS_USAGE.txt) for the keys,
+connection steps and capture controls. The streamer uses GDI desktop capture, WASAPI loopback audio, paced frame/UDP
+delivery, and `SendInput` for keyboard/mouse control forwarding. Mouse joystick and click mappings persist per Windows
+user. It does not install a virtual gamepad driver.
+
 The examples in `host/examples`: `sketch.c` (draw on the GamePad with your finger: touch, buttons, sound, rumble),
 `pipe.c` (video from ffmpeg).
 
