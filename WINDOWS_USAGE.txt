@@ -2,23 +2,27 @@ WUP Stream Windows host (64-bit Windows 10/11)
 
 1. Put the Wii U GamePad and this PC on the same Wi-Fi/LAN.
 2. Open WUP Stream on the GamePad and leave it at “Waiting for a Stream”.
-3. Run wup-stream.exe. A small control window and a console open. It discovers the waiting GamePad automatically. If discovery is blocked, pass the GamePad IP as the first argument: wup-stream.exe 192.168.1.42
+3. Run wup-stream.exe. A small control window and a console open, even when no GamePad is connected. It tries discovery for 3 seconds; use Connect / retry after opening WUP Stream. If broadcast discovery is blocked, pass the GamePad IP as the first argument: wup-stream.exe 192.168.1.42
 4. Allow wup-stream.exe through Windows Defender Firewall on Private networks (UDP; the library uses ports 50000/50001).
 
-The program scales the primary Windows desktop to 854x480, captures default-device system audio with WASAPI loopback, and sends both to the GamePad. It prints this PC's IPv4 addresses at startup to help diagnose connection issues. The GamePad and PC must be on the same network.
+The program captures the primary Windows desktop and default-device system audio with WASAPI loopback when connected. It prints this PC's IPv4 addresses at startup to help diagnose connection issues. The GamePad and PC must be on the same network.
 
-Windows settings are not changed: the 854x480 scaling happens only in the captured image in memory. The streamer does not change display resolution, refresh rate, HDR, Windows scaling, volume, or the default audio device. There are no video/audio settings to back up or restore. GamePad touch is sent as mouse input while forwarding is enabled; held keys and mouse clicks are released when forwarding stops or the program exits.
+Display mode is optional and temporary. Before allowing a change, the app writes the current primary display mode to wup-stream-display-backup.bin beside the EXE. It tests a supported 854x480 mode, or the closest supported 16:9-compatible mode at the same color depth. The new mode has a 15-second confirmation window; it restores automatically unless you click Keep display mode. The display button toggles back to the saved mode, and the app restores it on normal exit. If the app crashes, the next launch checks the backup and attempts recovery before making a fresh backup. Keep the EXE folder writable; the display toggle is disabled if it cannot safely write the backup. It changes the temporary display mode, not Windows scaling, HDR, volume, or audio device.
 
 Hotkeys:
   F8   Toggle desktop and system-audio streaming (OFF sends a black screen and silence).
   F9   Toggle GamePad-to-PC input forwarding.
   Esc  Exit.
 
-The control window has buttons for desktop/audio capture and GamePad input; F8/F9 remain available as shortcuts. The console shows connection status and this PC's IPv4 addresses.
+The control window stays available without a GamePad. The Connect / retry button becomes Disconnect while connected, and the status shows the GamePad's IP. The Open Windows Mobile Hotspot settings button opens the Windows page where you can start/stop the hotspot, choose its band, and see connected devices. Windows controls those items; this app does not directly manage or enumerate Mobile Hotspot clients. If Windows offers 5 GHz, choose it for the GamePad link.
 
-The Mouse control button cycles through none, left joystick and right joystick. The Mouse clicks button cycles through none, A/B, triggers (ZL left-click and ZR right-click), and triggers inverted (ZL right-click and ZR left-click). Touch still moves the pointer and holds left-click. These two selected modes are saved per Windows user in %LOCALAPPDATA%\WupStream\settings.ini and restored next time.
+The Mouse control button cycles through none, left joystick, right joystick, and D-pad. When D-pad is selected it moves the mouse instead of producing arrow keys, with a short acceleration ramp for smoother movement. The sensitivity slider sets movement speed from 1 to 10. The Mouse clicks button cycles through none, A/B, triggers (ZL left-click and ZR right-click), and triggers inverted (ZL right-click and ZR left-click). Touch still moves the pointer and holds left-click. The captured frame composites the mouse pointer, which GDI capture otherwise omits. GUI labels update only when their values change to avoid redraw flicker.
 
-Video frames are captured at the GamePad's 59.94 Hz refresh cadence and copied through a two-buffer capture path. UDP video packets have a default 100 microsecond spacing. Set WUPSTREAM_PACKET_DELAY_US to change it (0 disables the added delay; values are capped at 5000 microseconds).
+The bitrate button cycles through 10, 5, and 2.5 Mbps maximum rates. Changing it reconnects the stream so x264 can apply the new cap. High-latency buffer mode increases the GamePad frame cushion and UDP packet spacing; it may improve playback over jittery Wi-Fi at the cost of responsiveness. Changing it reconnects the stream. Mouse control, sensitivity, click mapping, bitrate, and high-latency mode are saved per Windows user in %LOCALAPPDATA%\WupStream\settings.ini and restored next time. The controls remain available before connecting.
+
+Video frames are captured at the GamePad's 59.94 Hz refresh cadence and copied through a two-buffer capture path. UDP video packets have a default 200 microsecond spacing. Set WUPSTREAM_PACKET_DELAY_US to change it (0 disables the added delay; values are capped at 5000 microseconds).
+
+Lowering capture FPS is unlikely to stop vertical shifts: the library still sends at the GamePad's 59.94 Hz refresh and repeats frames to stay in sync. If shifts persist, try reducing the stream bitrate to lower Wi-Fi packet load. In PowerShell, run `$env:WUPSTREAM_KBPS="5000"; $env:WUPSTREAM_PACKET_DELAY_US="200"; .\wup-stream.exe`. The default bitrate cap is 10000 kbps.
 
 GamePad buttons become keyboard input: A/B/X/Y -> J/K/U/I; D-pad -> arrow keys;
 ZL/ZR -> Q/E; L/R -> Z/C; Plus/Minus -> Enter/Backspace; Home -> P.

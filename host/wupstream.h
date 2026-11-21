@@ -17,7 +17,7 @@
  * Environment: WUPSTREAM_CRF (quality, lower is better, default 18), WUPSTREAM_KBPS (the most it may use, default
  * 10000), WUPSTREAM_DEBUG=1 (statistics), WUPSTREAM_DROP=n (lose 1 packet in n: a test), WUPSTREAM_X264 (more x264 settings,
  * "key=value:..."), WUPSTREAM_DUMP=file (the encoded stream, Annex B), WUPSTREAM_PACKET_DELAY_US (video UDP packet
- * spacing in microseconds; default 100, range 0..5000). */
+ * spacing in microseconds; default 200, range 0..5000), WUPSTREAM_HIGH_LATENCY=1 (larger frame cushion). */
 #pragma once
 #include <stdint.h>
 #ifdef __cplusplus
@@ -54,6 +54,7 @@ void wupstream_backlight(wupstream *w, int level, int keep);       /* the screen
                                                                       while this program runs; keep: also make it wupstream's
                                                                       own level (Nintendo's is never changed) */
 int wupstream_input(wupstream *w, wupstream_input_t *in);          /* the latest controls; 0, or -1: the GamePad is gone */
+int wupstream_peer_ipv4(wupstream *w, char *out, int out_size);    /* peer IPv4 address, if connected */
 void wupstream_close(wupstream *w);
 
 #ifdef __cplusplus

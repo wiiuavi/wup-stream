@@ -44,7 +44,7 @@ struct wupstream {
     double packet_last;
     int fresh, took, have_pic, quit, started, sent, repeats;
     struct { uint32_t frame; int len, idr; uint8_t *data; } kept[8];   /* the last frames, to send lost packets again */
-    int resent, drop, packet_delay_us, rumble, rumble_sent, mic, light, light_pad;   /* packet pacing; light: 1..6 | keep << 7 */
+    int resent, drop, packet_delay_us, cushion, rumble, rumble_sent, mic, light, light_pad;   /* pacing; light: 1..6 | keep << 7 */
     int16_t micbuf[48000]; int mic_w, mic_n;                 /* the last second of the microphone */            /* frames waiting on the pad: this refresh, the last */
 };
 
@@ -55,7 +55,6 @@ static void put(wupstream *w, const void *d, int n) { sendto(w->sock, (const cha
    frames instead: LVC 0x17cac). So every input packet says how long ago the pad's screen refreshed, and frames are sent
    in step with that. The network's delay only ever makes a measurement late: the earliest of each 64 counts. */
 #define PERIOD 0.0166833
-#define CUSHION 2                                             /* frames kept waiting on the pad (each: 16.7 ms later on screen) */
 static void refresh_seen(wupstream *w, double t) {
     if (!w->vper) { w->vper = PERIOD; w->vbase = t; w->win_n = 0; }
     double e = fmod(t - w->vbase, w->vper);
@@ -124,7 +123,7 @@ wupstream *wupstream_open(const char *ip, int timeout_ms) {
 #endif
     wupstream *w = calloc(1, sizeof *w);
     pthread_mutex_init(&w->packet_mu, NULL);
-    w->packet_delay_us = 100;
+    w->packet_delay_us = 200;
     w->sock = (int)socket(AF_INET, SOCK_DGRAM, 0);                   /* (its own port: several GamePads, several programs) */
     struct sockaddr_in me = { 0 };
     me.sin_family = AF_INET;
@@ -188,9 +187,10 @@ wupstream *wupstream_open(const char *ip, int timeout_ms) {
     w->slices = malloc(WUPSTREAM_W * WUPSTREAM_H * 2);
     w->keyframe = 1;
     w->drop = getenv("WUPSTREAM_DROP") ? atoi(getenv("WUPSTREAM_DROP")) : 0;
-    w->packet_delay_us = getenv("WUPSTREAM_PACKET_DELAY_US") ? atoi(getenv("WUPSTREAM_PACKET_DELAY_US")) : 100;
+    w->packet_delay_us = getenv("WUPSTREAM_PACKET_DELAY_US") ? atoi(getenv("WUPSTREAM_PACKET_DELAY_US")) : 200;
     if (w->packet_delay_us < 0) w->packet_delay_us = 0;
     if (w->packet_delay_us > 5000) w->packet_delay_us = 5000;
+    w->cushion = getenv("WUPSTREAM_HIGH_LATENCY") && atoi(getenv("WUPSTREAM_HIGH_LATENCY")) ? 4 : 2;
     w->phase = (getenv("WUPSTREAM_PHASE_MS") ? atof(getenv("WUPSTREAM_PHASE_MS")) : 3) / 1000;
     for (int i = 0; i < 4; i++) {                                    /* the sticks at rest (each pad is a little off) */
         int v = (w->report[6 + 2 * i] | w->report[7 + 2 * i] << 8) - 0x800;
@@ -249,7 +249,7 @@ static void send_picture(wupstream *w, int at_once) {
         /* The pad's decoder starts at most one frame per refresh, so it never catches up by itself: when more than the
            cushion waited there through a whole refresh (a big frame took longer than one to decode), let a refresh pass.
            Never on older readings: that empties its queue. */
-        if (w->wait_prev > CUSHION) { slot += w->vper; w->skips++; w->wait_prev = -1; w->wait_cur = 7; w->wait_t = slot; }
+        if (w->wait_prev > w->cushion) { slot += w->vper; w->skips++; w->wait_prev = -1; w->wait_cur = 7; w->wait_t = slot; }
         w->next = slot;
         /* the program has until 5 ms before then to hand over its next picture (the encoder's time); else the last one again */
         while ((t2 = now()) < w->next - 0.005 && !w->quit) {
@@ -308,11 +308,11 @@ static void send_picture(wupstream *w, int at_once) {
     pthread_mutex_unlock(&w->packet_mu);
     pthread_mutex_lock(&w->mu);
     w->frame++;
-    if (idr) w->extra = CUSHION;
+    if (idr) w->extra = w->cushion;
 }
 /* The sender. The pad's decoder stops for good when a refresh comes and it has no frame queued (measured: every second
    or third time). So (1) a cushion of frames is kept waiting on the pad: after every keyframe the same picture goes
-   CUSHION more times at once (each almost empty), and (2) every refresh gets a frame: the program's new picture, or,
+   w->cushion more times at the following refreshes, and (2) every refresh gets a frame: the program's new picture, or,
    when it has none in time (it hitched, or runs at 30 a second), the last one again. */
 static void *sender(void *arg) {
     wupstream *w = arg;
@@ -356,6 +356,7 @@ int wupstream_frame(wupstream *w, const void *pixels, int stride, int format) {
 int wupstream_audio(wupstream *w, const int16_t *lr, int frames) {
     pthread_mutex_lock(&w->mu); pump(w); pthread_mutex_unlock(&w->mu);
     if (w->gone) return -1;
+    pthread_mutex_lock(&w->packet_mu);                 /* keep audio datagrams out of a video frame's packet run */
     const uint8_t *src = (const uint8_t *)lr;
     int n = frames * 4;
     uint8_t pkt[8 + 1408] = { 'A' };
@@ -366,9 +367,14 @@ int wupstream_audio(wupstream *w, const int16_t *lr, int frames) {
         memcpy(pkt + 8, w->apart, w->napart);
         memcpy(pkt + 8 + w->napart, src, take - w->napart);
         src += take - w->napart; n -= take - w->napart; w->napart = 0;
-        put(w, pkt, 8 + take);
+        if (w->packet_delay_us > 0 && w->packet_last > 0) {
+            double due = w->packet_last + w->packet_delay_us / 1000000.0;
+            while (now() < due) ;                                  /* pace audio datagrams too; avoid short bursts */
+        }
+        put(w, pkt, 8 + take); w->packet_last = now();
     }
     memcpy(w->apart + w->napart, src, n); w->napart += n;
+    pthread_mutex_unlock(&w->packet_mu);
     return 0;
 }
 
@@ -393,6 +399,13 @@ void wupstream_rumble(wupstream *w, int on) {
     if (w->rumble != (on != 0)) { char r[4] = { 'R', (char)(on != 0), 0, 0 }; put(w, r, 4); }   /* at once; the sender says it again with every frame */
     w->rumble = on != 0;
     pthread_mutex_unlock(&w->mu);
+}
+
+int wupstream_peer_ipv4(wupstream *w, char *out, int out_size) {
+    if (!w || !out || out_size < 16) return -1;
+    const unsigned char *a = (const unsigned char *)&w->pad.sin_addr.s_addr;
+    int n = snprintf(out, (size_t)out_size, "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
+    return n > 0 && n < out_size ? 0 : -1;
 }
 
 void wupstream_close(wupstream *w) {
