@@ -2,7 +2,7 @@ WUP Stream Windows host (64-bit Windows 10/11)
 
 1. Put the Wii U GamePad and this PC on the same Wi-Fi/LAN.
 2. Open WUP Stream on the GamePad and leave it at “Waiting for a Stream”.
-3. Run wup-stream.exe. A small control window and a console open, even when no GamePad is connected. It tries discovery for 3 seconds; use Connect / retry after opening WUP Stream. If broadcast discovery is blocked, pass the GamePad IP as the first argument: wup-stream.exe 192.168.1.42
+3. Run wup-stream.exe. A control window and console open, even when no GamePad is connected. It tries discovery for 3 seconds; use Connect / retry after opening WUP Stream. If broadcast discovery is blocked, enter the GamePad's IPv4 in the GUI field (or pass it as the first argument): wup-stream.exe 192.168.1.42
 4. Allow wup-stream.exe through Windows Defender Firewall on Private networks (UDP; the library uses ports 50000/50001).
 
 The program captures the primary Windows desktop and default-device system audio with WASAPI loopback when connected. It prints this PC's IPv4 addresses at startup to help diagnose connection issues. The GamePad and PC must be on the same network.
@@ -14,18 +14,20 @@ Hotkeys:
   F9   Toggle GamePad-to-PC input forwarding.
   Esc  Exit.
 
-The control window stays available without a GamePad. The Connect / retry button becomes Disconnect while connected, and the status shows the GamePad's IP. The Open Windows Mobile Hotspot settings button opens the Windows page where you can start/stop the hotspot, choose its band, and see connected devices. Windows controls those items; this app does not directly manage or enumerate Mobile Hotspot clients. If Windows offers 5 GHz, choose it for the GamePad link.
+The control window stays available without a GamePad. The Connect / retry button becomes Disconnect while connected; Force restart app relaunches the program if the normal disconnect path is stuck. The last successfully connected GamePad IP is saved and prefilled on the next launch. The Open Windows Mobile Hotspot settings button opens the Windows page where you can start/stop the hotspot, choose its band, and see connected devices. Windows controls those items; this app does not directly manage or enumerate Mobile Hotspot clients. If Windows offers 5 GHz, choose it for the GamePad link.
 
-The Mouse control button cycles through none, left joystick, right joystick, and D-pad. When D-pad is selected it moves the mouse instead of producing arrow keys, with a short acceleration ramp for smoother movement. The sensitivity slider sets movement speed from 1 to 10. The Mouse clicks button cycles through none, A/B, triggers (ZL left-click and ZR right-click), and triggers inverted (ZL right-click and ZR left-click). Touch still moves the pointer and holds left-click. The captured frame composites the mouse pointer, which GDI capture otherwise omits. GUI labels update only when their values change to avoid redraw flicker.
+The settings are grouped under Stream, Input, and Network tabs. The control window can be resized; controls and stick diagrams widen with it. Tabs reduce the minimum height and keep the minimum window compact.
 
-The bitrate button cycles through 10, 5, and 2.5 Mbps maximum rates. Changing it reconnects the stream so x264 can apply the new cap. High-latency buffer mode increases the GamePad frame cushion and UDP packet spacing; it may improve playback over jittery Wi-Fi at the cost of responsiveness. Changing it reconnects the stream. Mouse control, sensitivity, click mapping, bitrate, and high-latency mode are saved per Windows user in %LOCALAPPDATA%\WupStream\settings.ini and restored next time. The controls remain available before connecting.
+On the Input tab, Mouse control cycles through none, left joystick, right joystick, and D-pad. D-pad mode moves the mouse instead of producing arrow keys, with an acceleration ramp. Mouse sensitivity ranges from 1 to 40. Stick deadzone ranges from 0% to 60%, is saved, and applies to both stick pairs. The live stick diagrams show each stick's X/Y position; input polling is independent of video capture. To correct center drift, leave both sticks untouched and click Calibrate stick center for about one second; calibrated offsets are saved. Configure button keys opens per-button keyboard bindings; use a single character or names such as Enter, Space, Up, F1, ScrollUp, or ScrollDown. Scroll bindings emit one mouse-wheel step per press. The defaults are A/B/X/Y -> J/K/U/I; D-pad -> arrow keys; ZL/ZR -> Q/E; L/R -> Z/C; Plus/Minus -> Enter/Backspace; Home -> P; L3/R3/TV -> V/N/M. Bindings are saved and flushed to settings.ini when you press Save. The Mouse clicks button cycles through none, A/B, triggers (ZL left-click and ZR right-click), and triggers inverted (ZL right-click and ZR left-click). Touch moves the pointer and holds left-click.
+
+The bitrate button cycles through 10, 5, and 2.5 Mbps maximum rates. Changing it reconnects the stream so x264 can apply the new cap. High-latency buffer mode increases the GamePad frame cushion and UDP packet spacing; it may improve playback over jittery Wi-Fi at the cost of responsiveness. Changing it reconnects the stream. Mouse control, sensitivity, deadzone, center calibration, button bindings, click mapping, bitrate, and high-latency mode are saved per Windows user in %LOCALAPPDATA%\WupStream\settings.ini and restored next time. The controls remain available before connecting.
 
 Video frames are captured at the GamePad's 59.94 Hz refresh cadence and copied through a two-buffer capture path. UDP video packets have a default 200 microsecond spacing. Set WUPSTREAM_PACKET_DELAY_US to change it (0 disables the added delay; values are capped at 5000 microseconds).
 
 Lowering capture FPS is unlikely to stop vertical shifts: the library still sends at the GamePad's 59.94 Hz refresh and repeats frames to stay in sync. If shifts persist, try reducing the stream bitrate to lower Wi-Fi packet load. In PowerShell, run `$env:WUPSTREAM_KBPS="5000"; $env:WUPSTREAM_PACKET_DELAY_US="200"; .\wup-stream.exe`. The default bitrate cap is 10000 kbps.
 
-GamePad buttons become keyboard input: A/B/X/Y -> J/K/U/I; D-pad -> arrow keys;
-ZL/ZR -> Q/E; L/R -> Z/C; Plus/Minus -> Enter/Backspace; Home -> P.
+GamePad buttons become configurable keyboard input (defaults: A/B/X/Y -> J/K/U/I; D-pad -> arrow keys;
+ZL/ZR -> Q/E; L/R -> Z/C; Plus/Minus -> Enter/Backspace; Home -> P).
 The left stick maps to WASD and the right stick maps to TFGH.
 When A/B or trigger clicks are selected, those buttons perform mouse clicks instead of their keyboard mapping; the other button mappings remain active.
 Touch moves the mouse pointer and holds the left button while touched. The app uses

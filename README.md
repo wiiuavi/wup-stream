@@ -33,6 +33,7 @@ It writes a statically linked `dist/wup-stream.exe`; see [WINDOWS_USAGE.txt](WIN
 connection steps and capture controls. The streamer uses GDI desktop capture, WASAPI loopback audio, paced frame/UDP
 delivery, and `SendInput` for keyboard/mouse control forwarding. Mouse joystick and click mappings persist per Windows
 user. It does not install a virtual gamepad driver.
+The Windows control window also shows live stick axes, uses a separate input polling thread, and supports configurable keyboard bindings, saved sensitivity/deadzone settings, and center recalibration.
 
 The examples in `host/examples`: `sketch.c` (draw on the GamePad with your finger: touch, buttons, sound, rumble),
 `pipe.c` (video from ffmpeg).

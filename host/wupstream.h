@@ -55,6 +55,7 @@ void wupstream_backlight(wupstream *w, int level, int keep);       /* the screen
                                                                       own level (Nintendo's is never changed) */
 int wupstream_input(wupstream *w, wupstream_input_t *in);          /* the latest controls; 0, or -1: the GamePad is gone */
 int wupstream_peer_ipv4(wupstream *w, char *out, int out_size);    /* peer IPv4 address, if connected */
+void wupstream_abort(wupstream *w);                               /* wake blocked frame calls; caller still closes normally */
 void wupstream_close(wupstream *w);
 
 #ifdef __cplusplus
